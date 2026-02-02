@@ -5,13 +5,39 @@ from .tmae import TMAE
 from .smae import SMAE
 
 
+class DownstreamSTPredictor(nn.Module):
+    def __init__(self, num_nodes, in_channels, embed_dim, num_heads=4, num_layers=2, dropout=0.1):
+        super().__init__()
+        self.embed = nn.Linear(in_channels, embed_dim)
+        
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=embed_dim,
+            nhead=num_heads,
+            dim_feedforward=embed_dim * 4,
+            dropout=dropout,
+            activation='gelu',
+            batch_first=True
+        )
+        self.encoder = nn.TransformerEncoder(encoder_layer, num_layers)
+        self.norm = nn.LayerNorm(embed_dim)
+        
+    def forward(self, x):
+        B, T, N, C = x.shape
+        x = self.embed(x)
+        x = x.view(B, T * N, -1)
+        x = self.encoder(x)
+        x = self.norm(x)
+        x = x.view(B, T, N, -1)
+        return x.mean(dim=(1, 2))
+
+
 class DownstreamPredictor(nn.Module):
     def __init__(
         self,
         num_nodes,
+        in_channels,
         embed_dim,
         hidden_dim=256,
-        num_layers=2,
         prediction_horizons=None,
         dropout=0.1
     ):
@@ -33,27 +59,50 @@ class DownstreamPredictor(nn.Module):
             nn.Linear(hidden_dim, hidden_dim)
         )
         
+        self.st_predictor = DownstreamSTPredictor(
+            num_nodes=num_nodes,
+            in_channels=in_channels,
+            embed_dim=embed_dim,
+            num_heads=4,
+            num_layers=2,
+            dropout=dropout
+        )
+        
+        self.st_mlp = nn.Sequential(
+            nn.Linear(embed_dim, hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, hidden_dim)
+        )
+        
         self.fusion = nn.Sequential(
-            nn.Linear(hidden_dim * 2, hidden_dim),
+            nn.Linear(hidden_dim * 3, hidden_dim),
             nn.ReLU(),
             nn.Dropout(dropout)
         )
         
-        self.predictor = nn.ModuleList([
-            nn.Linear(hidden_dim, num_nodes)
+        self.fc_layers = nn.ModuleList([
+            nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim),
+                nn.ReLU(),
+                nn.Linear(hidden_dim, num_nodes)
+            )
             for _ in self.prediction_horizons
         ])
         
-    def forward(self, temporal_repr, spatial_repr):
+    def forward(self, x, temporal_repr, spatial_repr):
         t_feat = self.temporal_mlp(temporal_repr)
         s_feat = self.spatial_mlp(spatial_repr)
         
-        fused = torch.cat([t_feat, s_feat], dim=-1)
+        st_repr = self.st_predictor(x)
+        st_feat = self.st_mlp(st_repr)
+        
+        fused = torch.cat([t_feat, s_feat, st_feat], dim=-1)
         fused = self.fusion(fused)
         
         predictions = []
-        for head in self.predictor:
-            pred = head(fused)
+        for fc in self.fc_layers:
+            pred = fc(fused)
             predictions.append(pred)
             
         return torch.stack(predictions, dim=1)
@@ -107,6 +156,7 @@ class STDMAE(nn.Module):
         
         self.downstream = DownstreamPredictor(
             num_nodes=num_nodes,
+            in_channels=in_channels,
             embed_dim=embed_dim,
             hidden_dim=hidden_dim,
             prediction_horizons=prediction_horizons,
@@ -126,7 +176,7 @@ class STDMAE(nn.Module):
         temporal_repr = temporal_repr.mean(dim=1)
         spatial_repr = spatial_repr.mean(dim=1)
         
-        predictions = self.downstream(temporal_repr, spatial_repr)
+        predictions = self.downstream(x, temporal_repr, spatial_repr)
         
         return predictions
     
