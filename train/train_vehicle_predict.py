@@ -7,8 +7,22 @@ import torch.nn as nn
 from torch.utils.data import DataLoader, random_split
 
 from models import VehiclePredictor, VehiclePredictorLite
-from data import create_synthetic_dataset, VehiclePredictionDataset, PrecomputedDensityDataset
-from utils import MultiHorizonLoss, compute_horizon_metrics
+from data import create_synthetic_dataset, PrecomputedDensityDataset
+
+
+class DensityMapLoss(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.mse = nn.MSELoss()
+        
+    def forward(self, pred, target):
+        pixel_loss = self.mse(pred, target)
+        
+        pred_counts = pred.sum(dim=(2, 3, 4))
+        target_counts = target.sum(dim=(2, 3, 4))
+        count_loss = self.mse(pred_counts, target_counts)
+        
+        return pixel_loss + 0.1 * count_loss
 
 
 class VehiclePredictorTrainer:
@@ -28,7 +42,7 @@ class VehiclePredictorTrainer:
         self.device = device
         self.prediction_horizons = prediction_horizons or [1, 3, 5, 10, 15]
         
-        self.criterion = MultiHorizonLoss(base_loss='mae')
+        self.criterion = DensityMapLoss()
         self.optimizer = torch.optim.AdamW(
             model.parameters(), lr=lr, weight_decay=weight_decay
         )
@@ -37,23 +51,19 @@ class VehiclePredictorTrainer:
         )
         
         self.best_val_loss = float('inf')
-        self.train_losses = []
-        self.val_losses = []
         
     def train_epoch(self):
         self.model.train()
         total_loss = 0
         num_batches = 0
         
-        for batch_idx, (inputs, targets) in enumerate(self.train_loader):
+        for inputs, targets in self.train_loader:
             inputs = inputs.to(self.device)
             targets = targets.to(self.device)
             
             self.optimizer.zero_grad()
-            
-            predictions, _ = self.model(inputs, mode='multi_horizon')
-            
-            loss, horizon_losses = self.criterion(predictions, targets)
+            predictions = self.model(inputs)
+            loss = self.criterion(predictions, targets)
             
             loss.backward()
             torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=3.0)
@@ -68,60 +78,48 @@ class VehiclePredictorTrainer:
     def validate(self):
         self.model.eval()
         total_loss = 0
+        total_mae = 0
         num_batches = 0
-        all_preds = []
-        all_targets = []
         
         for inputs, targets in self.val_loader:
             inputs = inputs.to(self.device)
             targets = targets.to(self.device)
             
-            predictions, _ = self.model(inputs, mode='multi_horizon')
-            loss, _ = self.criterion(predictions, targets)
+            predictions = self.model(inputs)
+            loss = self.criterion(predictions, targets)
+            
+            pred_counts = predictions.sum(dim=(2, 3, 4))
+            target_counts = targets.sum(dim=(2, 3, 4))
+            mae = torch.abs(pred_counts - target_counts).mean()
             
             total_loss += loss.item()
+            total_mae += mae.item()
             num_batches += 1
-            all_preds.append(predictions.cpu())
-            all_targets.append(targets.cpu())
             
-        all_preds = torch.cat(all_preds, dim=0)
-        all_targets = torch.cat(all_targets, dim=0)
-        
-        metrics = compute_horizon_metrics(
-            all_preds, all_targets, self.prediction_horizons
-        )
-        
-        return total_loss / num_batches, metrics
+        return total_loss / num_batches, total_mae / num_batches
     
     def train(self, num_epochs, save_path=None):
         for epoch in range(num_epochs):
             train_loss = self.train_epoch()
-            val_loss, val_metrics = self.validate()
+            val_loss, val_mae = self.validate()
             
             self.scheduler.step()
-            
-            self.train_losses.append(train_loss)
-            self.val_losses.append(val_loss)
             
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
                 if save_path:
-                    self.save_checkpoint(save_path, epoch, val_metrics)
+                    self.save_checkpoint(save_path, epoch)
                     
             if epoch % 10 == 0:
-                print(f"Epoch {epoch}: Train Loss={train_loss:.4f}, Val Loss={val_loss:.4f}")
-                for horizon, metrics in val_metrics.items():
-                    print(f"  {horizon}: MAE={metrics['mae']:.4f}, RMSE={metrics['rmse']:.4f}")
-                    
-        return self.train_losses, self.val_losses
-    
-    def save_checkpoint(self, path, epoch, metrics):
+                print(f"Epoch {epoch}: Train={train_loss:.4f}, Val={val_loss:.4f}, MAE={val_mae:.2f}")
+                
+    def save_checkpoint(self, path, epoch):
+        Path(path).parent.mkdir(parents=True, exist_ok=True)
         torch.save({
             'epoch': epoch,
             'model_state_dict': self.model.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-            'best_val_loss': self.best_val_loss,
-            'metrics': metrics
+            'best_val_loss': self.best_val_loss
         }, path)
         
     def load_checkpoint(self, path):
@@ -135,8 +133,6 @@ class VehiclePredictorTrainer:
 def create_model(config):
     if config.get('lite', False):
         return VehiclePredictorLite(
-            in_channels=config.get('in_channels', 1),
-            num_zones=config.get('num_zones', 8),
             embed_dim=config.get('embed_dim', 32),
             spatial_size=config.get('spatial_size', 18),
             hidden_dim=config.get('hidden_dim', 64),
@@ -145,8 +141,6 @@ def create_model(config):
         )
     else:
         return VehiclePredictor(
-            in_channels=config.get('in_channels', 1),
-            num_zones=config.get('num_zones', 8),
             embed_dim=config.get('embed_dim', 64),
             spatial_size=config.get('spatial_size', 18),
             num_encoder_layers=config.get('num_encoder_layers', 4),
@@ -166,14 +160,12 @@ def run_training(config):
         dataset = PrecomputedDensityDataset(
             density_dir=config['density_dir'],
             seq_len=config.get('seq_len', 24),
-            prediction_horizons=config.get('prediction_horizons', [1, 3, 5, 10, 15]),
-            num_zones=config.get('num_zones', 8)
+            prediction_horizons=config.get('prediction_horizons', [1, 3, 5, 10, 15])
         )
     else:
         dataset = create_synthetic_dataset(
             num_samples=config.get('num_samples', 2000),
             spatial_size=config.get('spatial_size', 18),
-            num_zones=config.get('num_zones', 8),
             seq_len=config.get('seq_len', 24),
             prediction_horizons=config.get('prediction_horizons', [1, 3, 5, 10, 15])
         )
@@ -199,7 +191,6 @@ def run_training(config):
     print(f"Model parameters: {sum(p.numel() for p in model.parameters()):,}")
     
     save_dir = Path(config.get('save_dir', 'checkpoints/prediction'))
-    save_dir.mkdir(parents=True, exist_ok=True)
     
     trainer = VehiclePredictorTrainer(
         model=model,
@@ -212,8 +203,7 @@ def run_training(config):
     )
     
     if config.get('resume_from'):
-        start_epoch = trainer.load_checkpoint(config['resume_from'])
-        print(f"Resumed from epoch {start_epoch}")
+        trainer.load_checkpoint(config['resume_from'])
     
     trainer.train(
         num_epochs=config.get('num_epochs', 100),
@@ -225,27 +215,18 @@ def run_training(config):
 
 if __name__ == '__main__':
     config = {
-        'in_channels': 1,
-        'num_zones': 8,
         'embed_dim': 64,
         'spatial_size': 18,
         'num_encoder_layers': 4,
         'num_heads': 4,
-        'mlp_ratio': 4,
-        'dropout': 0.1,
         'prediction_horizons': [1, 3, 5, 10, 15],
-        'max_seq_len': 50,
         'seq_len': 24,
         'lite': False,
         'num_samples': 2000,
         'batch_size': 16,
-        'num_workers': 0,
         'lr': 1e-3,
-        'weight_decay': 1e-5,
         'num_epochs': 100,
-        'save_dir': 'checkpoints/prediction',
-        'density_dir': None,
-        'resume_from': None
+        'save_dir': 'checkpoints/prediction'
     }
     
     run_training(config)

@@ -19,8 +19,8 @@ def load_prediction_model(checkpoint_path: Optional[str] = None, config: Optiona
     from models import VehiclePredictor
     config = config or {}
     model = VehiclePredictor(
-        num_zones=config.get('num_zones', 8),
         embed_dim=config.get('embed_dim', 64),
+        spatial_size=config.get('spatial_size', 18),
         prediction_horizons=config.get('prediction_horizons', [1, 3, 5, 10, 15])
     )
     if checkpoint_path:
@@ -61,16 +61,17 @@ class TrafficPredictor:
         current_count = density.sum().item()
         
         result = {
-            'density_map': density.cpu().numpy(),
+            'density_map': density.cpu().numpy()[0],
             'current_count': current_count,
             'buffer_ready': len(self.density_buffer) >= self.buffer_size
         }
         
         if len(self.density_buffer) >= self.buffer_size:
-            seq = torch.cat(list(self.density_buffer), dim=0).unsqueeze(0).to(self.device)
-            predictions, _ = self.prediction_model(seq, mode='multi_horizon')
-            result['predictions'] = predictions.cpu().numpy()[0]
-            result['zone_totals'] = predictions.sum(dim=-1).cpu().numpy()[0]
+            seq = torch.stack(list(self.density_buffer), dim=1).to(self.device)
+            future_densities = self.prediction_model(seq)
+            
+            result['future_densities'] = future_densities.cpu().numpy()[0]
+            result['future_counts'] = future_densities.sum(dim=(2, 3, 4)).cpu().numpy()[0]
             
         return result
     
@@ -87,6 +88,6 @@ if __name__ == '__main__':
         
         print(f"Frame {i+1}: Count={result['current_count']:.1f}", end='')
         if result['buffer_ready']:
-            print(f" | Predictions: {result['zone_totals']}")
+            print(f" | Future counts: {result['future_counts']}")
         else:
             print(f" | Buffering... ({len(predictor.density_buffer)}/{predictor.buffer_size})")

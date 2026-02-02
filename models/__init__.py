@@ -1,4 +1,3 @@
-from .zone_extractor import ZoneAttentionPooling, ZoneFeatureExtractor, ZoneCountRegressor
 from .temporal_encoder import (
     PositionalEncoding,
     SpatialAttention,
@@ -8,10 +7,10 @@ from .temporal_encoder import (
     TemporalOnlyEncoder
 )
 from .vehicle_predictor import (
-    MultiHorizonHead,
-    AutoregressiveHead,
+    DensityEncoder,
+    DensityDecoder,
+    MultiHorizonDensityHead,
     VehiclePredictor,
     VehiclePredictorLite
 )
 from .vehicle_estimation import REsnext
-from .pipeline import TrafficSignalPipeline, InferencePipeline

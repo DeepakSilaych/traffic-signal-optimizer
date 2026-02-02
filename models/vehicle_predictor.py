@@ -1,22 +1,68 @@
 import torch
 import torch.nn as nn
 
-from .zone_extractor import ZoneFeatureExtractor
 from .temporal_encoder import SpatioTemporalEncoder
 
 
-class MultiHorizonHead(nn.Module):
-    def __init__(self, embed_dim, num_zones, prediction_horizons):
+class DensityEncoder(nn.Module):
+    def __init__(self, in_channels=1, embed_dim=64, spatial_size=18):
+        super().__init__()
+        self.spatial_size = spatial_size
+        self.embed_dim = embed_dim
+        
+        self.conv_embed = nn.Sequential(
+            nn.Conv2d(in_channels, embed_dim // 2, kernel_size=3, padding=1),
+            nn.BatchNorm2d(embed_dim // 2),
+            nn.ReLU(),
+            nn.Conv2d(embed_dim // 2, embed_dim, kernel_size=3, padding=1),
+            nn.BatchNorm2d(embed_dim),
+            nn.ReLU()
+        )
+        
+        self.pos_embed = nn.Parameter(torch.randn(1, spatial_size * spatial_size, embed_dim))
+        
+    def forward(self, x):
+        if x.dim() == 5:
+            B, T, C, H, W = x.shape
+            x = x.view(B * T, C, H, W)
+            features = self.conv_embed(x)
+            features = features.flatten(2).transpose(1, 2)
+            features = features + self.pos_embed
+            features = features.view(B, T, H * W, -1)
+        else:
+            B, C, H, W = x.shape
+            features = self.conv_embed(x)
+            features = features.flatten(2).transpose(1, 2)
+            features = features + self.pos_embed
+        return features
+
+
+class DensityDecoder(nn.Module):
+    def __init__(self, embed_dim=64, spatial_size=18, out_channels=1):
+        super().__init__()
+        self.spatial_size = spatial_size
+        
+        self.decode = nn.Sequential(
+            nn.Linear(embed_dim, embed_dim),
+            nn.ReLU(),
+            nn.Linear(embed_dim, out_channels)
+        )
+        
+    def forward(self, x):
+        B, N, D = x.shape
+        out = self.decode(x)
+        out = out.transpose(1, 2).view(B, -1, self.spatial_size, self.spatial_size)
+        return out
+
+
+class MultiHorizonDensityHead(nn.Module):
+    def __init__(self, embed_dim, spatial_size, prediction_horizons):
         super().__init__()
         self.prediction_horizons = prediction_horizons
-        self.num_horizons = len(prediction_horizons)
+        self.spatial_size = spatial_size
         
-        self.horizon_projections = nn.ModuleList([
-            nn.Sequential(
-                nn.Linear(embed_dim, embed_dim // 2),
-                nn.ReLU(),
-                nn.Linear(embed_dim // 2, 1)
-            )
+        self.horizon_decoders = nn.ModuleList([
+            DensityDecoder(embed_dim, spatial_size, out_channels=1)
             for _ in prediction_horizons
         ])
         
@@ -25,50 +71,9 @@ class MultiHorizonHead(nn.Module):
         last_features = encoded_features[:, -1, :, :]
         
         predictions = []
-        for proj in self.horizon_projections:
-            pred = proj(last_features).squeeze(-1)
+        for decoder in self.horizon_decoders:
+            pred = decoder(last_features)
             predictions.append(pred)
-            
-        return torch.stack(predictions, dim=1)
-
-
-class AutoregressiveHead(nn.Module):
-    def __init__(self, embed_dim, num_zones, max_horizon=12):
-        super().__init__()
-        self.max_horizon = max_horizon
-        self.embed_dim = embed_dim
-        
-        self.step_embedding = nn.Embedding(max_horizon, embed_dim)
-        
-        self.decoder = nn.GRU(
-            input_size=embed_dim + num_zones,
-            hidden_size=embed_dim,
-            num_layers=2,
-            batch_first=True
-        )
-        
-        self.output_proj = nn.Linear(embed_dim, num_zones)
-        
-    def forward(self, encoded_features, num_steps):
-        B, T, N, D = encoded_features.shape
-        
-        context = encoded_features[:, -1, :, :].mean(dim=1)
-        hidden = context.unsqueeze(0).repeat(2, 1, 1)
-        
-        last_pred = torch.zeros(B, N, device=encoded_features.device)
-        predictions = []
-        
-        for step in range(num_steps):
-            step_embed = self.step_embedding(
-                torch.tensor([step], device=encoded_features.device)
-            ).expand(B, -1)
-            
-            decoder_input = torch.cat([step_embed, last_pred], dim=-1).unsqueeze(1)
-            
-            output, hidden = self.decoder(decoder_input, hidden)
-            pred = self.output_proj(output.squeeze(1))
-            predictions.append(pred)
-            last_pred = pred
             
         return torch.stack(predictions, dim=1)
 
@@ -77,7 +82,6 @@ class VehiclePredictor(nn.Module):
     def __init__(
         self,
         in_channels=1,
-        num_zones=8,
         embed_dim=64,
         spatial_size=18,
         num_encoder_layers=4,
@@ -92,12 +96,11 @@ class VehiclePredictor(nn.Module):
         if prediction_horizons is None:
             prediction_horizons = [1, 3, 5, 10, 15]
             
-        self.num_zones = num_zones
+        self.spatial_size = spatial_size
         self.prediction_horizons = prediction_horizons
         
-        self.zone_extractor = ZoneFeatureExtractor(
+        self.encoder = DensityEncoder(
             in_channels=in_channels,
-            num_zones=num_zones,
             embed_dim=embed_dim,
             spatial_size=spatial_size
         )
@@ -111,43 +114,23 @@ class VehiclePredictor(nn.Module):
             max_seq_len=max_seq_len
         )
         
-        self.prediction_head = MultiHorizonHead(
+        self.prediction_head = MultiHorizonDensityHead(
             embed_dim=embed_dim,
-            num_zones=num_zones,
+            spatial_size=spatial_size,
             prediction_horizons=prediction_horizons
         )
         
-        self.autoregressive_head = AutoregressiveHead(
-            embed_dim=embed_dim,
-            num_zones=num_zones,
-            max_horizon=max(prediction_horizons) + 5
-        )
-        
-    def forward(self, x, mode='multi_horizon', num_steps=None):
-        zone_features, attn_weights = self.zone_extractor(x)
-        encoded = self.temporal_encoder(zone_features)
-        
-        if mode == 'multi_horizon':
-            predictions = self.prediction_head(encoded)
-        elif mode == 'autoregressive':
-            if num_steps is None:
-                num_steps = max(self.prediction_horizons)
-            predictions = self.autoregressive_head(encoded, num_steps)
-        else:
-            raise ValueError(f"Unknown mode: {mode}")
-            
-        return predictions, attn_weights
-    
-    def get_zone_attention(self, x):
-        _, attn_weights = self.zone_extractor(x)
-        return attn_weights
+    def forward(self, x):
+        features = self.encoder(x)
+        encoded = self.temporal_encoder(features)
+        predictions = self.prediction_head(encoded)
+        return predictions
 
 
 class VehiclePredictorLite(nn.Module):
     def __init__(
         self,
         in_channels=1,
-        num_zones=8,
         embed_dim=32,
         spatial_size=18,
         hidden_dim=64,
@@ -159,18 +142,18 @@ class VehiclePredictorLite(nn.Module):
         if prediction_horizons is None:
             prediction_horizons = [1, 3, 5]
             
-        self.num_zones = num_zones
+        self.spatial_size = spatial_size
         self.prediction_horizons = prediction_horizons
+        num_patches = spatial_size * spatial_size
         
-        self.zone_extractor = ZoneFeatureExtractor(
+        self.encoder = DensityEncoder(
             in_channels=in_channels,
-            num_zones=num_zones,
             embed_dim=embed_dim,
             spatial_size=spatial_size
         )
         
         self.temporal_encoder = nn.LSTM(
-            input_size=embed_dim * num_zones,
+            input_size=embed_dim * num_patches,
             hidden_size=hidden_dim,
             num_layers=num_layers,
             batch_first=True,
@@ -178,18 +161,20 @@ class VehiclePredictorLite(nn.Module):
         )
         
         self.prediction_heads = nn.ModuleList([
-            nn.Linear(hidden_dim, num_zones)
+            nn.Sequential(
+                nn.Linear(hidden_dim, num_patches),
+                nn.Unflatten(-1, (1, spatial_size, spatial_size))
+            )
             for _ in prediction_horizons
         ])
         
     def forward(self, x):
         B, T, C, H, W = x.shape
         
-        zone_features, attn = self.zone_extractor(x)
+        features = self.encoder(x)
+        features_flat = features.view(B, T, -1)
         
-        zone_flat = zone_features.view(B, T, -1)
-        
-        lstm_out, _ = self.temporal_encoder(zone_flat)
+        lstm_out, _ = self.temporal_encoder(features_flat)
         last_hidden = lstm_out[:, -1, :]
         
         predictions = []
@@ -197,4 +182,4 @@ class VehiclePredictorLite(nn.Module):
             pred = head(last_hidden)
             predictions.append(pred)
             
-        return torch.stack(predictions, dim=1), attn
+        return torch.stack(predictions, dim=1)
