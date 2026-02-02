@@ -16,11 +16,11 @@ def load_estimation_model(checkpoint_path: Optional[str] = None) -> nn.Module:
 
 
 def load_prediction_model(checkpoint_path: Optional[str] = None, config: Optional[Dict] = None) -> nn.Module:
-    from models import VehiclePredictor
+    from models import STDMAEForDensityMap
     config = config or {}
-    model = VehiclePredictor(
-        embed_dim=config.get('embed_dim', 64),
+    model = STDMAEForDensityMap(
         spatial_size=config.get('spatial_size', 18),
+        embed_dim=config.get('embed_dim', 96),
         prediction_horizons=config.get('prediction_horizons', [1, 3, 5, 10, 15])
     )
     if checkpoint_path:

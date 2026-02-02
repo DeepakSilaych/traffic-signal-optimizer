@@ -21,40 +21,35 @@ ESTIMATION_CONFIG = {
 }
 
 PREDICTION_CONFIG = {
-    'in_channels': 1,
-    'num_zones': 8,
-    'embed_dim': 64,
     'spatial_size': 18,
-    'num_encoder_layers': 4,
+    'patch_size': 12,
+    'embed_dim': 96,
+    'encoder_depth': 4,
+    'decoder_depth': 1,
     'num_heads': 4,
-    'mlp_ratio': 4,
-    'dropout': 0.1,
+    'hidden_dim': 256,
+    'mask_ratio': 0.75,
     'prediction_horizons': [1, 3, 5, 10, 15],
-    'max_seq_len': 50,
     'seq_len': 24,
-    'lite': False,
     'num_samples': 2000,
     'batch_size': 16,
-    'num_workers': 0,
     'lr': 1e-3,
-    'weight_decay': 1e-5,
+    'pretrain_epochs': 50,
     'num_epochs': 100,
-    'save_dir': 'checkpoints/prediction',
-    'density_dir': None,
-    'resume_from': None
+    'freeze_encoders': True
 }
 
 
 def main():
     parser = argparse.ArgumentParser(description='Train traffic signal models')
     parser.add_argument('--step', type=int, choices=[1, 2], required=True,
-                        help='Training step: 1=estimation, 2=prediction')
+                        help='Training step: 1=estimation, 2=prediction (STD-MAE)')
     parser.add_argument('--epochs', type=int, default=100)
+    parser.add_argument('--pretrain-epochs', type=int, default=50)
     parser.add_argument('--batch-size', type=int, default=16)
     parser.add_argument('--lr', type=float, default=1e-3)
     parser.add_argument('--data-dir', type=str, default=None)
     parser.add_argument('--resume', type=str, default=None)
-    parser.add_argument('--lite', action='store_true', help='Use lite model for prediction')
     
     args = parser.parse_args()
     
@@ -68,25 +63,23 @@ def main():
         if args.resume:
             config['resume_from'] = args.resume
             
-        print("=" * 50)
+        print("=" * 60)
         print("Training Step 1: Vehicle Estimation (Image -> Density)")
-        print("=" * 50)
+        print("=" * 60)
         train_estimation(config)
         
     elif args.step == 2:
         config = PREDICTION_CONFIG.copy()
         config['num_epochs'] = args.epochs
+        config['pretrain_epochs'] = args.pretrain_epochs
         config['batch_size'] = args.batch_size
         config['lr'] = args.lr
-        config['lite'] = args.lite
         if args.data_dir:
             config['density_dir'] = args.data_dir
-        if args.resume:
-            config['resume_from'] = args.resume
             
-        print("=" * 50)
-        print("Training Step 2: Vehicle Prediction (Density -> Future Counts)")
-        print("=" * 50)
+        print("=" * 60)
+        print("Training Step 2: STD-MAE (Density -> Future Density)")
+        print("=" * 60)
         train_prediction(config)
 
 
