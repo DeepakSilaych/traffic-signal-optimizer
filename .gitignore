@@ -3,3 +3,6 @@ __pycache__/
 *.pyc
 checkpoints/
 output/
+data/density_history/
+data/output/
+.DS_Store

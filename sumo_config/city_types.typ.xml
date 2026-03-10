@@ -1,0 +1,5 @@
+<types>
+  <type id="arterial" numLanes="3" speed="13.89"/>
+  <type id="collector" numLanes="2" speed="11.11"/>
+  <type id="local" numLanes="1" speed="8.33"/>
+</types>

@@ -1,0 +1,35 @@
+<routes>
+  <vType id="car" accel="2.6" decel="4.5" sigma="0.5" length="5" minGap="2.5" maxSpeed="13.89"/>
+  <route id="art_east" edges="E1_J1 J1_J4 J4_J7 J7_J11 J11_J17 J17_E10"/>
+  <route id="art_west" edges="E10_J17 J17_J11 J11_J7 J7_J4 J4_J1 J1_E1"/>
+  <route id="art_ns_1" edges="E12_J4 J4_J5 J5_J6 J6_E5"/>
+  <route id="art_ns_2" edges="E2_J2 J2_J5 J5_J8 J8_J12 J12_J15 J15_J18 J18_E9"/>
+  <route id="coll_1" edges="E3_J3 J3_J6 J6_J9 J9_J13 J13_E6"/>
+  <route id="coll_2" edges="E11_J11 J11_J12 J12_J13 J13_J16 J16_J19 J19_E8"/>
+  <route id="coll_3" edges="E5_J6 J6_J5 J5_J2 J2_J1 J1_E1"/>
+  <route id="coll_4" edges="E9_J18 J18_J17 J17_J11 J11_J7 J7_J4 J4_E12"/>
+  <route id="coll_diag" edges="E4_J3 J3_J2 J2_J5 J5_J20 J20_J8 J8_J12 J12_J15 J15_J18 J18_E9"/>
+  <route id="local_1" edges="E3_J3 J3_J6 J6_J9 J9_J10"/>
+  <route id="local_2" edges="E7_J19 J19_J16 J16_J13 J13_J9 J9_J6 J6_E5"/>
+  <route id="local_3" edges="E6_J13 J13_J16 J16_J15 J15_J14"/>
+  <route id="local_4" edges="E2_J2 J2_J3 J3_J6 J6_J9 J9_J13 J13_E6"/>
+  <route id="local_5" edges="E12_J4 J4_J7 J7_J8 J8_J20 J20_J5 J5_J2 J2_E2"/>
+  <route id="through_1" edges="E1_J1 J1_J4 J4_J7 J7_J8 J8_J12 J12_J15 J15_J18 J18_J19 J19_E8"/>
+  <route id="through_2" edges="E4_J3 J3_J6 J6_J9 J9_J13 J13_J16 J16_J19 J19_E7"/>
+  <flow id="f_art_east" type="car" route="art_east" begin="0" end="3600" vehsPerHour="800" departLane="best"/>
+  <flow id="f_art_west" type="car" route="art_west" begin="0" end="3600" vehsPerHour="700" departLane="best"/>
+  <flow id="f_art_ns_1" type="car" route="art_ns_1" begin="0" end="3600" vehsPerHour="400" departLane="best"/>
+  <flow id="f_art_ns_2" type="car" route="art_ns_2" begin="0" end="3600" vehsPerHour="500" departLane="best"/>
+  <flow id="f_coll_1" type="car" route="coll_1" begin="0" end="3600" vehsPerHour="350" departLane="best"/>
+  <flow id="f_coll_2" type="car" route="coll_2" begin="0" end="3600" vehsPerHour="300" departLane="best"/>
+  <flow id="f_coll_3" type="car" route="coll_3" begin="0" end="3600" vehsPerHour="250" departLane="best"/>
+  <flow id="f_coll_4" type="car" route="coll_4" begin="0" end="3600" vehsPerHour="300" departLane="best"/>
+  <flow id="f_coll_diag" type="car" route="coll_diag" begin="0" end="3600" vehsPerHour="200" departLane="best"/>
+  <flow id="f_local_1" type="car" route="local_1" begin="0" end="3600" vehsPerHour="150" departLane="best"/>
+  <flow id="f_local_2" type="car" route="local_2" begin="0" end="3600" vehsPerHour="150" departLane="best"/>
+  <flow id="f_local_3" type="car" route="local_3" begin="0" end="3600" vehsPerHour="100" departLane="best"/>
+  <flow id="f_local_4" type="car" route="local_4" begin="0" end="3600" vehsPerHour="200" departLane="best"/>
+  <flow id="f_local_5" type="car" route="local_5" begin="0" end="3600" vehsPerHour="180" departLane="best"/>
+  <flow id="f_through_1" type="car" route="through_1" begin="0" end="3600" vehsPerHour="250" departLane="best"/>
+  <flow id="f_through_2" type="car" route="through_2" begin="0" end="3600" vehsPerHour="180" departLane="best"/>
+</routes>

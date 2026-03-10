@@ -1,0 +1,21 @@
+<routes>
+    <vType id="car" accel="2.6" decel="4.5" sigma="0.5" length="5" minGap="2.5" maxSpeed="13.89"/>
+
+    <route id="r_left_right" edges="A0A1 A1A2 A2B2 B2C2"/>
+    <route id="r_right_left" edges="C2B2 B2A2 A2A1 A1A0"/>
+    <route id="r_top_bottom" edges="A0B0 B0C0"/>
+    <route id="r_bottom_top" edges="C0B0 B0A0"/>
+    <route id="r_diag1" edges="A0A1 A1B1 B1C1"/>
+    <route id="r_diag2" edges="C2B2 B2B1 B1B0 B0A0"/>
+    <route id="r_mid_h" edges="B0B1 B1B2"/>
+    <route id="r_mid_v" edges="A1B1 B1C1"/>
+
+    <flow id="f_lr" type="car" route="r_left_right" begin="0" end="3600" vehsPerHour="400" departLane="best"/>
+    <flow id="f_rl" type="car" route="r_right_left" begin="0" end="3600" vehsPerHour="350" departLane="best"/>
+    <flow id="f_tb" type="car" route="r_top_bottom" begin="0" end="3600" vehsPerHour="300" departLane="best"/>
+    <flow id="f_bt" type="car" route="r_bottom_top" begin="0" end="3600" vehsPerHour="250" departLane="best"/>
+    <flow id="f_d1" type="car" route="r_diag1" begin="0" end="3600" vehsPerHour="200" departLane="best"/>
+    <flow id="f_d2" type="car" route="r_diag2" begin="0" end="3600" vehsPerHour="200" departLane="best"/>
+    <flow id="f_mh" type="car" route="r_mid_h" begin="0" end="3600" vehsPerHour="300" departLane="best"/>
+    <flow id="f_mv" type="car" route="r_mid_v" begin="0" end="3600" vehsPerHour="250" departLane="best"/>
+</routes>
